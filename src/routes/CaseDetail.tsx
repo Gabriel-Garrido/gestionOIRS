@@ -487,7 +487,6 @@ export default function CaseDetail() {
                           field={block.fileField as any}
                           file={block.file}
                           onChanged={refreshAll}
-                          showReplaceOnly
                         />
                         {block.file?.name && (
                           <FileSlot
