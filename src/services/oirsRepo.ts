@@ -19,6 +19,7 @@ import {
 } from 'firebase/firestore'
 import type { OirsCase, CaseEvent, SlaStatus, Sector, Staff } from '../types/oirs'
 import { calcSla } from '../hooks/useSla'
+import { dateLowerBound, dateUpperBound } from '../utils/date'
 
 export type ListFilters = Partial<{
   sectorId: string
@@ -63,8 +64,10 @@ export async function listCases(
   }
   if (filters.staffId) cons.push(where('allegedStaffIds', 'array-contains', filters.staffId))
   // Range on receivedAt
-  if (filters.receivedFrom) cons.push(where('receivedAt', '>=', filters.receivedFrom))
-  if (filters.receivedTo) cons.push(where('receivedAt', '<=', filters.receivedTo))
+  const receivedFrom = dateLowerBound(filters.receivedFrom)
+  if (receivedFrom) cons.push(where('receivedAt', '>=', receivedFrom))
+  const receivedTo = dateUpperBound(filters.receivedTo)
+  if (receivedTo) cons.push(where('receivedAt', '<=', receivedTo))
 
   const base = query(collection(db, CASES), ...cons, orderBy('receivedAt', 'desc'), limit(pageSize))
   const q = cursor ? query(base, startAfter(cursor)) : base
@@ -315,12 +318,14 @@ export async function listCasesByAllegedStaff(
     where('allegedStaffIds', 'array-contains', filters.staffId),
   ]
 
-  if (filters.startDate) {
-    cons.push(where('receivedAt', '>=', filters.startDate))
+  const startDate = dateLowerBound(filters.startDate)
+  if (startDate) {
+    cons.push(where('receivedAt', '>=', startDate))
   }
 
-  if (filters.endDate) {
-    cons.push(where('receivedAt', '<=', filters.endDate))
+  const endDate = dateUpperBound(filters.endDate)
+  if (endDate) {
+    cons.push(where('receivedAt', '<=', endDate))
   }
 
   const base = query(collection(db, CASES), ...cons, orderBy('receivedAt', 'desc'), limit(pageSize))

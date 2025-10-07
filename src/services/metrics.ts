@@ -7,6 +7,7 @@ import type {
 	RequestType,
 	SlaStatus,
 } from '../types/oirs'
+import { dateLowerBound, dateUpperBound } from '../utils/date'
 
 export type MetricsFilters = {
 	startDate: string
@@ -51,11 +52,11 @@ const CASES_COLLECTION = 'oirs_cases'
 
 export async function fetchMetrics(filters: MetricsFilters): Promise<MetricsResult> {
 	const cons: QueryConstraint[] = []
-	const startIso = filters.startDate ? startOfDayIso(filters.startDate) : null
-	const endIso = filters.endDate ? endOfDayIso(filters.endDate) : null
+	const startBound = dateLowerBound(filters.startDate)
+	const endBound = dateUpperBound(filters.endDate)
 
-	if (startIso) cons.push(where('receivedAt', '>=', startIso))
-	if (endIso) cons.push(where('receivedAt', '<=', endIso))
+	if (startBound) cons.push(where('receivedAt', '>=', startBound))
+	if (endBound) cons.push(where('receivedAt', '<=', endBound))
 
 	if (filters.sectorIds.length === 1) {
 		cons.push(where('sectorId', '==', filters.sectorIds[0]))
@@ -65,10 +66,10 @@ export async function fetchMetrics(filters: MetricsFilters): Promise<MetricsResu
 
 	const snap = await getDocs(query(collection(db, CASES_COLLECTION), ...cons, orderBy('receivedAt')))
 
-	const cases: OirsCase[] = snap.docs.map((docSnap) => {
-		const data = docSnap.data() as OirsCase
-		return { ...data, id: docSnap.id }
-	})
+		const cases: OirsCase[] = snap.docs.map((docSnap) => {
+			const data = docSnap.data() as OirsCase
+			return { ...data, id: docSnap.id }
+		})
 
 		const filtered = cases.filter((c) => matchesFilters(c, filters))
 	const rows = filtered.map((c) => buildRow(c))
@@ -218,15 +219,5 @@ function median(values: number[]): number {
 		return (sorted[mid - 1] + sorted[mid]) / 2
 	}
 	return sorted[mid]
-}
-
-function startOfDayIso(date: string): string {
-	const [year, month, day] = date.split('-').map((value) => parseInt(value, 10))
-	return new Date(Date.UTC(year, (month || 1) - 1, day || 1, 0, 0, 0, 0)).toISOString()
-}
-
-function endOfDayIso(date: string): string {
-	const [year, month, day] = date.split('-').map((value) => parseInt(value, 10))
-	return new Date(Date.UTC(year, (month || 1) - 1, day || 1, 23, 59, 59, 999)).toISOString()
 }
 

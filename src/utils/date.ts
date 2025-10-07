@@ -57,6 +57,15 @@ export function toDateInputValue(value: string | null | undefined): string {
   return normalized ?? ''
 }
 
+export function dateLowerBound(value: string | null | undefined): string | null {
+  return normalizeDateInput(value)
+}
+
+export function dateUpperBound(value: string | null | undefined): string | null {
+  const normalized = normalizeDateInput(value)
+  return normalized ? `${normalized}\uf8ff` : null
+}
+
 export function iso(d: Date | string | null | undefined): string | null {
   if (!d) return null
   if (typeof d === 'string') {

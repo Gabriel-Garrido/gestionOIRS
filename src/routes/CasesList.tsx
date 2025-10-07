@@ -6,7 +6,7 @@ import SlaChip from '../components/ui/SlaChip'
 import Table, { type Column } from '../components/Table/Table'
 import CasesFilters from '../components/Filters/CasesFilters'
 import { useQueryParamsFilters } from '../hooks/useQueryParamsFilters'
-import { fmtDate } from '../utils/date'
+import { fmtDate, formatDateUtcYmd } from '../utils/date'
 import type { OirsCase } from '../types/oirs'
 import { intakeChannelLabel, requestTypeLabel } from '../utils/labels'
 import Button from '../components/ui/Button'
@@ -60,16 +60,16 @@ export default function CasesList() {
     if (Number.isNaN(y)) return {}
 
     if (!mStr || mStr === 'ALL') {
-      const fromDate = new Date(Date.UTC(y, 0, 1, 0, 0, 0, 0))
-      const toDate = new Date(Date.UTC(y, 11, 31, 23, 59, 59, 999))
-      return { from: fromDate.toISOString(), to: toDate.toISOString() }
+      const fromDate = new Date(Date.UTC(y, 0, 1))
+      const toDate = new Date(Date.UTC(y, 11, 31))
+      return { from: formatDateUtcYmd(fromDate), to: formatDateUtcYmd(toDate) }
     }
 
     const m = Number.parseInt(mStr, 10)
     if (Number.isNaN(m)) return {}
-    const fromDate = new Date(Date.UTC(y, m - 1, 1, 0, 0, 0, 0))
-    const toDate = new Date(Date.UTC(y, m, 0, 23, 59, 59, 999))
-    return { from: fromDate.toISOString(), to: toDate.toISOString() }
+    const fromDate = new Date(Date.UTC(y, m - 1, 1))
+    const toDate = new Date(Date.UTC(y, m, 0))
+    return { from: formatDateUtcYmd(fromDate), to: formatDateUtcYmd(toDate) }
   }
 
   function buildEffectiveFilters(): Partial<ListFilters> {
