@@ -56,15 +56,19 @@ export default function CasesList() {
 
   function monthRange(yStr?: string, mStr?: string): { from?: string; to?: string } {
     if (!yStr) return {}
-    const y = parseInt(yStr, 10)
+    const y = Number.parseInt(yStr, 10)
+    if (Number.isNaN(y)) return {}
+
     if (!mStr || mStr === 'ALL') {
-      const fromDate = new Date(y, 0, 1, 0, 0, 0, 0)
-      const toDate = new Date(y, 11, 31, 23, 59, 59, 999)
+      const fromDate = new Date(Date.UTC(y, 0, 1, 0, 0, 0, 0))
+      const toDate = new Date(Date.UTC(y, 11, 31, 23, 59, 59, 999))
       return { from: fromDate.toISOString(), to: toDate.toISOString() }
     }
-    const m = parseInt(mStr, 10)
-    const fromDate = new Date(y, m - 1, 1)
-    const toDate = new Date(y, m, 0, 23, 59, 59, 999)
+
+    const m = Number.parseInt(mStr, 10)
+    if (Number.isNaN(m)) return {}
+    const fromDate = new Date(Date.UTC(y, m - 1, 1, 0, 0, 0, 0))
+    const toDate = new Date(Date.UTC(y, m, 0, 23, 59, 59, 999))
     return { from: fromDate.toISOString(), to: toDate.toISOString() }
   }
 
