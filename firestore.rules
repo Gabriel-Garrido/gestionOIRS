@@ -1,0 +1,45 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isISO(s) {
+      return s is string && s.size() >= 20 && s.size() <= 30 && s.matches("^\\d{4}-\\d{2}-\\d{2}T.*Z$")
+    }
+    function inArray(x, arr) {
+      return arr.hasOnly([x]) || arr.hasAny([x])
+    }
+
+    // Regla general MVP: autenticados
+    match /{document=**} {
+      allow read, write: if request.auth != null;
+    }
+
+    // Validaciones mínimas del modelo OIRS
+    match /oirs_cases/{id} {
+      allow create: if request.auth != null &&
+        (request.resource.data.requestType in ['reclamo','solicitud','felicitacion','sugerencia','consulta']) &&
+        (request.resource.data.intakeChannel in ['plataforma','formulario','superintendencia','correo','alo santiago','carta presidente','otro']) &&
+        (request.resource.data.gender in ['femenino','masculino','trans masculino','trans femenino','no binario']) &&
+        (request.resource.data.migratoryStatus in ['chileno','migrante']) &&
+  (request.resource.data.status in ['en revision','enviado a funcionario','descargos recibidos','enviado a direccion','respuesta direccion recibida','respuesta enviada','archivado']) &&
+        (request.resource.data.sla in ['dentro de plazo','fuera de plazo','pendiente dentro de plazo','pendiente fuera de plazo']) &&
+        isISO(request.resource.data.receivedAt) &&
+        isISO(request.resource.data.dueAt);
+
+      // En update permitimos valores antiguos si no cambian, para facilitar migraciones
+      allow update: if request.auth != null &&
+        ((request.resource.data.requestType in ['reclamo','solicitud','felicitacion','sugerencia','consulta']) || request.resource.data.requestType == resource.data.requestType) &&
+        ((request.resource.data.intakeChannel in ['plataforma','formulario','superintendencia','correo','alo santiago','carta presidente','otro']) || request.resource.data.intakeChannel == resource.data.intakeChannel) &&
+        ((request.resource.data.gender in ['femenino','masculino','trans masculino','trans femenino','no binario']) || request.resource.data.gender == resource.data.gender) &&
+        ((request.resource.data.migratoryStatus in ['chileno','migrante']) || request.resource.data.migratoryStatus == resource.data.migratoryStatus) &&
+  ((request.resource.data.status in ['en revision','enviado a funcionario','descargos recibidos','enviado a direccion','respuesta direccion recibida','respuesta enviada','archivado']) || request.resource.data.status == resource.data.status) &&
+        ((request.resource.data.sla in ['dentro de plazo','fuera de plazo','pendiente dentro de plazo','pendiente fuera de plazo']) || request.resource.data.sla == resource.data.sla) &&
+        (isISO(request.resource.data.receivedAt) || request.resource.data.receivedAt == resource.data.receivedAt) &&
+        (isISO(request.resource.data.dueAt) || request.resource.data.dueAt == resource.data.dueAt);
+
+      allow read: if request.auth != null;
+    }
+
+    // Nota: En producción, endurecer con roles (oirs/direccion/funcionario/solo_lectura)
+    // y permisos por documento (p.ej. staff aludido con lectura limitada y subida de descargos).
+  }
+}
