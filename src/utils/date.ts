@@ -63,7 +63,7 @@ export function dateLowerBound(value: string | null | undefined): string | null 
 
 export function dateUpperBound(value: string | null | undefined): string | null {
   const normalized = normalizeDateInput(value)
-  return normalized ? `${normalized}\uf8ff` : null
+  return normalized ? `${normalized}` : null
 }
 
 export function iso(d: Date | string | null | undefined): string | null {
@@ -96,8 +96,9 @@ export function fmtDate(d: string | null | undefined, locale = 'es-CL') {
 
 // --- Business days helper (WORKDAY.INTL-like) ---
 // weekendMask: 7 chars Mon..Sun, '1' = no laborable; por defecto '0000011' (S y D)
+// Usa UTC para evitar desfases de zona horaria en comparaciones de día de semana.
 export function isWeekendIntl(date: Date, weekendMask = '0000011') {
-  const day = (date.getDay() + 6) % 7 // Mon=0..Sun=6
+  const day = (date.getUTCDay() + 6) % 7 // Mon=0..Sun=6, basado en UTC
   return weekendMask[day] === '1'
 }
 
@@ -114,7 +115,8 @@ export function addBusinessDaysIntl(
   const d = new Date(Date.UTC(y, m, day))
   let added = 0
   while (added < businessDays) {
-    d.setDate(d.getDate() + 1)
+    // Usar operaciones UTC para no mezclar hora local y UTC
+    d.setUTCDate(d.getUTCDate() + 1)
     const ymd = d.toISOString().slice(0, 10)
     if (isWeekendIntl(d, weekendMask)) continue
     if (holidays?.has(ymd)) continue
@@ -123,8 +125,11 @@ export function addBusinessDaysIntl(
   return d.toISOString()
 }
 
+// --- Feriados Chile por año ---
+
 // Feriados Chile 2025 (fallback)
 export const CL_2025_HOLIDAYS = new Set<string>([
+  '2025-01-01',
   '2025-04-18',
   '2025-04-19',
   '2025-05-01',
@@ -142,40 +147,59 @@ export const CL_2025_HOLIDAYS = new Set<string>([
   '2025-12-25',
 ])
 
-// --- calculateDueDate (obligatorio) usando date-fns ---
-import { isWeekend as dfIsWeekend } from 'date-fns'
+// Feriados Chile 2026 (fallback)
+export const CL_2026_HOLIDAYS = new Set<string>([
+  '2026-01-01',
+  '2026-04-03', // Viernes Santo (Semana Santa 2026: Pascua 5 abril)
+  '2026-04-04', // Sábado de Gloria
+  '2026-05-01',
+  '2026-05-21',
+  '2026-06-22', // Día Nacional de los Pueblos Indígenas (lunes próx. al solsticio 21 jun)
+  '2026-06-29',
+  '2026-07-16',
+  '2026-08-15',
+  '2026-09-18',
+  '2026-09-19',
+  '2026-10-12',
+  '2026-10-31',
+  '2026-11-01',
+  '2026-12-08',
+  '2026-12-25',
+])
 
-const CL_2025_LIST = [
-  '2025-04-18',
-  '2025-04-19',
-  '2025-05-01',
-  '2025-05-21',
-  '2025-06-20',
-  '2025-06-29',
-  '2025-07-16',
-  '2025-08-15',
-  '2025-09-18',
-  '2025-09-19',
-  '2025-10-12',
-  '2025-10-31',
-  '2025-11-01',
-  '2025-12-08',
-  '2025-12-25',
-]
-const CL_2025_SET = new Set(CL_2025_LIST)
+/** Devuelve un Set combinando los feriados conocidos para los años indicados. */
+export function getKnownHolidays(...years: number[]): Set<string> {
+  const result = new Set<string>()
+  const byYear: Record<number, Set<string>> = {
+    2025: CL_2025_HOLIDAYS,
+    2026: CL_2026_HOLIDAYS,
+  }
+  for (const year of years) {
+    const src = byYear[year]
+    if (src) for (const d of src) result.add(d)
+  }
+  return result
+}
 
-export function calculateDueDate(receivedAt: Date, requestType: string): Date {
+// --- calculateDueDate (obligatorio) usando operaciones UTC ---
+export function calculateDueDate(
+  receivedAt: Date,
+  requestType: string,
+  holidays?: Set<string>
+): Date {
   const businessDays = requestType === 'felicitacion' ? 20 : 15
-  // sumamos día por día, saltando fines de semana y feriados 2025 CL
   const d = new Date(
     Date.UTC(receivedAt.getUTCFullYear(), receivedAt.getUTCMonth(), receivedAt.getUTCDate())
   )
+  // Si no se proveen feriados, usar los del año de la fecha recibida y el siguiente
+  const effectiveHolidays =
+    holidays ?? getKnownHolidays(receivedAt.getUTCFullYear(), receivedAt.getUTCFullYear() + 1)
   let added = 0
   while (added < businessDays) {
-    d.setDate(d.getDate() + 1)
+    d.setUTCDate(d.getUTCDate() + 1)
     const ymd = d.toISOString().slice(0, 10)
-    if (dfIsWeekend(d)) continue
-    if (CL_2025_SET.has(ymd)) continue
+    if (isWeekendIntl(d)) continue
+    if (effectiveHolidays.has(ymd)) continue
     added++
   }
   return d

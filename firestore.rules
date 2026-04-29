@@ -2,44 +2,47 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     function isISO(s) {
-      return s is string && s.size() >= 20 && s.size() <= 30 && s.matches("^\\d{4}-\\d{2}-\\d{2}T.*Z$")
+      return s is string && s.size() >= 10 && s.size() <= 30 && s.matches("^\\d{4}-\\d{2}-\\d{2}.*$")
     }
-    function inArray(x, arr) {
-      return arr.hasOnly([x]) || arr.hasAny([x])
+    // Compara solo la parte de fecha YYYY-MM-DD de dos ISO strings
+    function datePartOf(s) {
+      return s.size() >= 10 ? s[0:10] : s
     }
 
-    // Regla general MVP: autenticados
+    // Regla general MVP: autenticados pueden leer/escribir
+    // Nota: en producción endurecer con roles (oirs/direccion/funcionario/solo_lectura)
     match /{document=**} {
       allow read, write: if request.auth != null;
     }
 
-    // Validaciones mínimas del modelo OIRS
+    // Validaciones del modelo OIRS sobre la colección principal
     match /oirs_cases/{id} {
       allow create: if request.auth != null &&
         (request.resource.data.requestType in ['reclamo','solicitud','felicitacion','sugerencia','consulta']) &&
         (request.resource.data.intakeChannel in ['plataforma','formulario','superintendencia','correo','alo santiago','carta presidente','otro']) &&
         (request.resource.data.gender in ['femenino','masculino','trans masculino','trans femenino','no binario']) &&
         (request.resource.data.migratoryStatus in ['chileno','migrante']) &&
-  (request.resource.data.status in ['en revision','enviado a funcionario','descargos recibidos','enviado a direccion','respuesta direccion recibida','respuesta enviada','archivado']) &&
+        (request.resource.data.status in ['en revision','enviado a funcionario','descargos recibidos','enviado a direccion','respuesta direccion recibida','respuesta enviada','archivado']) &&
         (request.resource.data.sla in ['dentro de plazo','fuera de plazo','pendiente dentro de plazo','pendiente fuera de plazo']) &&
         isISO(request.resource.data.receivedAt) &&
-        isISO(request.resource.data.dueAt);
+        isISO(request.resource.data.dueAt) &&
+        // La fecha de vencimiento no puede ser anterior a la fecha de recepción
+        datePartOf(request.resource.data.dueAt) >= datePartOf(request.resource.data.receivedAt);
 
-      // En update permitimos valores antiguos si no cambian, para facilitar migraciones
+      // En update permitimos valores anteriores si no cambian (facilita migraciones)
       allow update: if request.auth != null &&
         ((request.resource.data.requestType in ['reclamo','solicitud','felicitacion','sugerencia','consulta']) || request.resource.data.requestType == resource.data.requestType) &&
         ((request.resource.data.intakeChannel in ['plataforma','formulario','superintendencia','correo','alo santiago','carta presidente','otro']) || request.resource.data.intakeChannel == resource.data.intakeChannel) &&
         ((request.resource.data.gender in ['femenino','masculino','trans masculino','trans femenino','no binario']) || request.resource.data.gender == resource.data.gender) &&
         ((request.resource.data.migratoryStatus in ['chileno','migrante']) || request.resource.data.migratoryStatus == resource.data.migratoryStatus) &&
-  ((request.resource.data.status in ['en revision','enviado a funcionario','descargos recibidos','enviado a direccion','respuesta direccion recibida','respuesta enviada','archivado']) || request.resource.data.status == resource.data.status) &&
+        ((request.resource.data.status in ['en revision','enviado a funcionario','descargos recibidos','enviado a direccion','respuesta direccion recibida','respuesta enviada','archivado']) || request.resource.data.status == resource.data.status) &&
         ((request.resource.data.sla in ['dentro de plazo','fuera de plazo','pendiente dentro de plazo','pendiente fuera de plazo']) || request.resource.data.sla == resource.data.sla) &&
         (isISO(request.resource.data.receivedAt) || request.resource.data.receivedAt == resource.data.receivedAt) &&
-        (isISO(request.resource.data.dueAt) || request.resource.data.dueAt == resource.data.dueAt);
+        (isISO(request.resource.data.dueAt) || request.resource.data.dueAt == resource.data.dueAt) &&
+        // La fecha de vencimiento no puede quedar anterior a la de recepción
+        datePartOf(request.resource.data.dueAt) >= datePartOf(request.resource.data.receivedAt);
 
       allow read: if request.auth != null;
     }
-
-    // Nota: En producción, endurecer con roles (oirs/direccion/funcionario/solo_lectura)
-    // y permisos por documento (p.ej. staff aludido con lectura limitada y subida de descargos).
   }
 }

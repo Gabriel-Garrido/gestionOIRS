@@ -1,6 +1,12 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { listAllCases, listCases, listSectors, listStaff, type ListFilters } from '../services/oirsRepo'
+import {
+  listAllCases,
+  listCases,
+  listSectors,
+  listStaff,
+  type ListFilters,
+} from '../services/oirsRepo'
 import type { DocumentData, DocumentSnapshot } from 'firebase/firestore'
 import SlaChip from '../components/ui/SlaChip'
 import Table, { type Column } from '../components/Table/Table'
@@ -16,7 +22,7 @@ import TableContainer from '../components/ui/TableContainer'
 import EmptyState from '../components/ui/EmptyState'
 import StatusBadge from '../components/ui/StatusBadge'
 import Loading from '../components/ui/Loading'
-import { isWeekendIntl, CL_2025_HOLIDAYS } from '../utils/date'
+import { isWeekendIntl, getKnownHolidays } from '../utils/date'
 import Pagination from '../components/ui/Pagination'
 import Section from '../components/ui/Section'
 import { exportCasesToExcel } from '../utils/exportExcel'
@@ -132,10 +138,7 @@ export default function CasesList() {
       const staffNameById = new Map(
         staff.map((member) => [member.id, member.name || member.email || member.id])
       )
-      const filename = exportFilename(
-        effectiveFilters.receivedFrom,
-        effectiveFilters.receivedTo
-      )
+      const filename = exportFilename(effectiveFilters.receivedFrom, effectiveFilters.receivedTo)
       exportCasesToExcel(cases, {
         filename,
         context: { sectorNameById, staffNameById },
@@ -281,15 +284,30 @@ export default function CasesList() {
   }, [JSON.stringify(filters), page])
 
   function calculateBusinessDaysRemaining(dueDateISO: string): number {
-    const today = new Date()
-    const dueDate = new Date(dueDateISO)
-    let remainingDays = 0
+    const todayYmd = new Date().toISOString().slice(0, 10)
+    const dueYmd = dueDateISO.slice(0, 10)
 
-    while (today < dueDate) {
-      today.setDate(today.getDate() + 1)
-      const ymd = today.toISOString().slice(0, 10)
-      if (isWeekendIntl(today)) continue
-      if (CL_2025_HOLIDAYS.has(ymd)) continue
+    if (todayYmd >= dueYmd) return 0
+
+    const currentYear = new Date().getUTCFullYear()
+    const knownHolidays = getKnownHolidays(currentYear, currentYear + 1)
+
+    // Cursor UTC en la fecha de hoy
+    const cursor = new Date(
+      Date.UTC(
+        Number(todayYmd.slice(0, 4)),
+        Number(todayYmd.slice(5, 7)) - 1,
+        Number(todayYmd.slice(8, 10))
+      )
+    )
+
+    let remainingDays = 0
+    while (true) {
+      cursor.setUTCDate(cursor.getUTCDate() + 1)
+      const ymd = cursor.toISOString().slice(0, 10)
+      if (ymd > dueYmd) break
+      if (isWeekendIntl(cursor)) continue
+      if (knownHolidays.has(ymd)) continue
       remainingDays++
     }
 
@@ -374,7 +392,7 @@ export default function CasesList() {
           <Button as={Link} to={`/cases/${r.id}/edit`} variant="outline" size="sm">
             Editar
           </Button>
-          {r.googleDriveFolder ? (
+          {r.googleDriveFolder?.startsWith('https://') ? (
             <Button
               as="a"
               href={r.googleDriveFolder}

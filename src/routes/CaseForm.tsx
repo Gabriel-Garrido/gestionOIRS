@@ -9,13 +9,16 @@ import {
   topics,
   type OirsCase,
   type CaseStatus,
+  type RequestType,
+  type IntakeChannel,
+  type Topic,
 } from '../types/oirs'
 import { addEvent, createCase, getCase, updateCase, listSectors } from '../services/oirsRepo'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
 import {
   addBusinessDaysIntl,
-  CL_2025_HOLIDAYS,
+  getKnownHolidays,
   formatDateLocalYmd,
   normalizeDateInput,
   toDateInputValue,
@@ -92,14 +95,15 @@ export default function CaseForm() {
     reset,
     formState: { errors, isSubmitting },
   } = useForm<FormData>({
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     resolver: zodResolver(schema) as any,
     defaultValues: {
       folio: '',
-      requestType: isEdit ? undefined : ('' as unknown as any),
-      intakeChannel: isEdit ? undefined : ('' as unknown as any),
-      gender: isEdit ? undefined : ('' as unknown as any),
-      migratoryStatus: isEdit ? undefined : ('' as unknown as any),
-      sectorId: isEdit ? undefined : ('' as unknown as any),
+      requestType: undefined,
+      intakeChannel: undefined,
+      gender: undefined,
+      migratoryStatus: undefined,
+      sectorId: undefined,
       receivedAt: '', // Eliminar la fecha por defecto
       dueAt: '',
       respondedAt: null,
@@ -122,7 +126,10 @@ export default function CaseForm() {
   >('')
   const [openNewStaff, setOpenNewStaff] = useState(false)
   const [staffRefreshKey, setStaffRefreshKey] = useState(0)
-  const [holidays, setHolidays] = useState<Set<string>>(CL_2025_HOLIDAYS)
+  const [holidays, setHolidays] = useState<Set<string>>(() => {
+    const year = new Date().getFullYear()
+    return getKnownHolidays(year, year + 1)
+  })
   const [sectors, setSectors] = useState<{ id: string; name: string }[]>([])
 
   // Watchers
@@ -131,25 +138,44 @@ export default function CaseForm() {
   const selectedStaffIds = (watch('allegedStaffIds') as string[] | undefined) ?? []
   const watchRequestType = watch('requestType') as OirsCase['requestType'] | ''
 
-  // Cargar feriados: Firestore -> API externa -> fallback constantes
+  // Cargar feriados para el año actual y el siguiente: Firestore -> API externa -> fallback constantes
   useEffect(() => {
     let active = true
     ;(async () => {
-      try {
-        const fromDb = await getHolidaysDoc('CL-2025')
-        if (active && fromDb?.length) {
-          setHolidays(new Set(fromDb))
-          return
+      const currentYear = new Date().getFullYear()
+      const years = [currentYear, currentYear + 1]
+      const combined = new Set<string>()
+
+      for (const year of years) {
+        let loaded = false
+        try {
+          const fromDb = await getHolidaysDoc(`CL-${year}`)
+          if (fromDb?.length) {
+            fromDb.forEach((d) => combined.add(d))
+            loaded = true
+          }
+          // eslint-disable-next-line no-empty
+        } catch {}
+
+        if (!loaded) {
+          try {
+            const fromApi = await fetchChileHolidays(year)
+            if (fromApi?.length) {
+              fromApi.forEach((d) => combined.add(d))
+              loaded = true
+            }
+            // eslint-disable-next-line no-empty
+          } catch {}
         }
-      } catch {}
-      try {
-        const fromApi = await fetchChileHolidays(2025)
-        if (active && fromApi?.length) {
-          setHolidays(new Set(fromApi))
-          return
+
+        if (!loaded) {
+          // Fallback a constantes conocidas para el año
+          const known = getKnownHolidays(year)
+          for (const d of known) combined.add(d)
         }
-      } catch {}
-      if (active) setHolidays(CL_2025_HOLIDAYS)
+      }
+
+      if (active && combined.size > 0) setHolidays(combined)
     })()
     return () => {
       active = false
@@ -168,10 +194,10 @@ export default function CaseForm() {
   useEffect(() => {
     if (!isEdit) {
       if (watchRequestType && watchRequestType !== 'reclamo') {
-        setValue('topic', 'No aplica' as any, { shouldValidate: true })
+        setValue('topic', 'No aplica' as Topic, { shouldValidate: true })
       } else if (watchRequestType === 'reclamo') {
         // Si estaba en 'No aplica', limpiar para obligar selección válida
-        if ((watch('topic') as any) === 'No aplica') setValue('topic', '' as any)
+        if (watch('topic') === 'No aplica') setValue('topic', '' as unknown as Topic)
       }
     }
   }, [watchRequestType, isEdit, setValue])
@@ -184,7 +210,7 @@ export default function CaseForm() {
         const toYmd = (s?: string | null) => toDateInputValue(s)
         reset({
           ...(c as unknown as FormData),
-          folio: (c.folio ?? '') as any,
+          folio: (c.folio ?? '') as FormData['folio'],
           receivedAt: toYmd(c.receivedAt),
           dueAt: toYmd(c.dueAt),
         } as unknown as FormData)
@@ -233,6 +259,22 @@ export default function CaseForm() {
 
     if (!data.dueAt) {
       errors.push('Debe ingresar la fecha de vencimiento.')
+    }
+
+    if (data.receivedAt && data.dueAt && data.dueAt < data.receivedAt) {
+      errors.push('La fecha de vencimiento no puede ser anterior a la fecha de recibido.')
+    }
+
+    if (
+      data.respondedAt &&
+      data.receivedAt &&
+      String(data.respondedAt).slice(0, 10) < data.receivedAt.slice(0, 10)
+    ) {
+      errors.push('La fecha de respuesta no puede ser anterior a la fecha de recibido.')
+    }
+
+    if (data.patientEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(data.patientEmail)) {
+      errors.push('El correo electrónico del paciente no tiene un formato válido.')
     }
 
     if (data.requestType === 'reclamo') {
@@ -302,7 +344,9 @@ export default function CaseForm() {
         await updateCase(id, next)
       } catch (e: unknown) {
         const msg =
-          typeof e === 'object' && e && 'message' in e ? String((e as any).message) : String(e)
+          typeof e === 'object' && e && 'message' in e
+            ? String((e as { message: unknown }).message)
+            : String(e)
         if (msg.includes('Folio ya existe')) {
           setToast({ msg, type: 'error' })
           return
@@ -342,7 +386,9 @@ export default function CaseForm() {
       newId = await createCase(base)
     } catch (e: unknown) {
       const msg =
-        typeof e === 'object' && e && 'message' in e ? String((e as any).message) : String(e)
+        typeof e === 'object' && e && 'message' in e
+          ? String((e as { message: unknown }).message)
+          : String(e)
       if (msg.includes('Folio ya existe')) {
         setToast({ msg, type: 'error' })
         return
@@ -425,7 +471,7 @@ export default function CaseForm() {
             <label className="block text-sm font-medium">Tipo</label>
             <Select
               value={watch('requestType') ?? ''}
-              onChange={(e) => setValue('requestType', e.target.value as any)}
+              onChange={(e) => setValue('requestType', e.target.value as RequestType)}
             >
               <option value="">Selecciona el tipo de solicitud…</option>
               {requestTypes.map((t) => (
@@ -442,7 +488,7 @@ export default function CaseForm() {
             <label className="block text-sm font-medium">Canal</label>
             <Select
               value={watch('intakeChannel') ?? ''}
-              onChange={(e) => setValue('intakeChannel', e.target.value as any)}
+              onChange={(e) => setValue('intakeChannel', e.target.value as IntakeChannel)}
             >
               <option value="">Selecciona el canal de ingreso…</option>
               {intakeChannels.map((t) => (
@@ -458,9 +504,7 @@ export default function CaseForm() {
           <div className="sm:col-span-2">
             <label className="block text-sm font-medium">Tema</label>
             <SelectTopic
-              value={
-                watchRequestType === 'reclamo' ? (watch('topic') as any) : ('No aplica' as any)
-              }
+              value={watchRequestType === 'reclamo' ? watch('topic') : ('No aplica' as Topic)}
               onChange={(v) => setValue('topic', v, { shouldValidate: true })}
               disabled={watchRequestType !== 'reclamo'}
               hideNoAplica={watchRequestType === 'reclamo'}
